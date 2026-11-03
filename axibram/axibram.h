@@ -39,7 +39,7 @@
 #include <linux/of_platform.h>
 #include <linux/dynamic_debug.h>
 
-#define AXIBRAM_VERSION  0x1000006 // V1.0.0.0
+#define AXIBRAM_VERSION  0x1000001 // V1.0.0.0
 // 定义模块驱动名
 #define AXIBRAM_DEV_NAME "axibram"
 // 定义最大支持驱动数量
