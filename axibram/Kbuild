@@ -1,0 +1,9 @@
+
+# 指示此模块应编译到内核Makefile，以及用于编译它的文件
+$(TARGET)-objs = $(patsubst %.c,%.o,$(filter %.c,$(BUILD_FILES)))
+obj-m += $(TARGET).o
+
+
+# 设置用于编译模块的CFLAGS，添加include标志。请注意，src变量指向模块的目录。
+INC_FLAGS = $(addprefix -I ,$(INC_DIRS))
+ccflags-y = $(INC_FLAGS) -Werror -ggdb

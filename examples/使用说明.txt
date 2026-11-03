@@ -1,0 +1,10 @@
+1、uart_assic.elf使用
+    uart_assic.elf 端口号 波特率 发送的数据，如下所示：
+    发送数据：uart_assic.elf 0 115200 aksjdfaksdjgaksdjfasdfjads
+    接收数据：按字符显示，如上数据显示为：aksjdfaksdjgaksdjfasdfjads
+
+2、uart_hex.elf使用
+    uart_hex.elf 端口号 波特率 发送的数据，如下所示：
+    发送数据：uart_hex.elf 0 115200 aabbcc0123456103ef
+    接收数据：按十六进制显示，如上数据显示为：0xaa 0xbb 0xcc 0x01 0x23 0x45 0x61 0x03 0xef
+
