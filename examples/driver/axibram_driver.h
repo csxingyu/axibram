@@ -68,6 +68,8 @@ void axibram_driver_close(int filp);
 */
 void *axibram_driver_malloc(int filp, unsigned int size);
 void axibram_driver_free(void *dma_addr, unsigned int size);
+// 读取寄存器空间大小
+unsigned int axibram_get_reg_size(int filp);
 /*
 标题：映射寄存器内存
 参数:

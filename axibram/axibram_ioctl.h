@@ -51,6 +51,8 @@ struct axibram_data_transaction
 #define AXIBRAM_IO_WRITE_REGISTER   _IOW(AXIBRAM_IOCTL_MAGIC, 2, struct axibram_register)
 // Select map V7启动
 #define AXIBRAM_IO_SELECT_MAP       _IOW(AXIBRAM_IOCTL_MAGIC, 3, struct axibram_data_transaction)
+// 获取寄存器空间大小
+#define AXIBRAM_IO_GET_REG_SIZE     _IOR(AXIBRAM_IOCTL_MAGIC, 4, unsigned int)
 // 安装/卸载中断，0：卸载中断，否则安装中断
 #define AXIBRAM_IO_IRQ              _IOW(AXIBRAM_IOCTL_MAGIC, 10, unsigned int)
 

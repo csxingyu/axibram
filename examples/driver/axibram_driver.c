@@ -62,7 +62,15 @@ void axibram_driver_free(void *addr, unsigned int size)
 {
     munmap(addr, size);
 }
+// 读取寄存器空间大小
+unsigned int axibram_get_reg_size(int filp)
+{
+    unsigned int size = 0;
+    if ( -1 == ioctl(filp, AXIBRAM_IO_GET_REG_SIZE, &size) )
+        return 0;
 
+    return size;
+}
 /*
 标题：映射寄存器内存
 参数:

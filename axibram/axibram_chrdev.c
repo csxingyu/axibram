@@ -542,6 +542,16 @@ static long axibram_ioctl(struct file *filp, unsigned int cmd, unsigned long dat
             }
             break;
         }
+        case AXIBRAM_IO_GET_REG_SIZE:  // 读取寄存器空间大小
+        {
+            unsigned int size = dev->resource.mem[0].size;
+            if ( 0 != copy_to_user(arg_ptr, &size, sizeof(unsigned int)) )
+            {
+                ret = -EFAULT;
+            }
+
+            break;
+        }
         case AXIBRAM_IO_IRQ: // 安装卸载中断
         {
             axibram_log_err("install irq pid = %ld.\n", data);
