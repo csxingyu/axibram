@@ -1,283 +1,278 @@
-# axibram AXI 接口驱动
+# AXI BRAM 驱动使用说明书
+
+> 湖南迈克森伟电子科技有限公司 · 软件研发部
 
 ## 1. 项目简介
 
-本项目是面向**复旦微 FMQL（ARM + FPGA SoC，类 Zynq 架构）**平台的 AXI 接口字符设备驱动及配套应用程序。
+本仓库实现一个运行在 **复旦微 FMQL（类 Zynq）平台** 上的 Linux 字符设备驱动。CPU 通过 AXI 总线访问 FPGA 侧的 Block RAM / SelectMap 配置口，为用户态程序提供以下能力：
 
-驱动名为 `axibram`，将 FPGA 侧的多个 AXI 外设（寄存器、UART、GPIO、SIM 安全卡、SelectMap 配置口）以统一的字符设备接口（ioctl / mmap）暴露给用户态，并配套一整套测试程序。
+- **寄存器读写**：通过 `ioctl` 或 `mmap` 直接读写 FPGA 外设寄存器；
+- **DMA 一致性内存**：申请非缓存（uncached）的连续 DMA 内存并映射到用户态，供 FPGA 侧 DMA 引擎使用；
+- **FPGA 中断通知**：支持实时信号、`select/poll`、`SIGIO` 三种异步/同步通知方式；
+- **SelectMap 在线烧写**：通过 SelectMap 接口在线配置 Xilinx 7 系列 FPGA bitstream。
 
-| 项 | 值 |
+设备节点形如 `/dev/axibram0`、`/dev/axibram1` ……，最多支持 17 个实例（`axibram0` ~ `axibram16`）。
+
+## 2. 开发环境
+
+| 项目 | 说明 |
 |---|---|
-| 内核 | linux-4.14.55-fmsh |
-| 交叉编译器 | arm-linux-gnueabihf-（Linaro 7.3.1） |
-| 内核模块 | axibram.ko |
-| 设备节点 | /dev/axibram0 ~ /dev/axibram16 |
-| 设备树 compatible | xlnx,axibram-chrdev0 ~ xlnx,axibram-chrdev16 |
+| 目标平台 | 复旦微 FMQL（ARM Cortex-A9，类 Xilinx Zynq） |
+| 内核版本 | `linux-4.14.55-fmsh`（复旦微定制内核） |
+| 架构 | ARM 32 位（`ARCH=arm`） |
+| 交叉编译器 | `arm-linux-gnueabihf-gcc`（gcc-linaro 7.3.1） |
+| 编译主机 | Linux（交叉编译） |
 
-## 2. 目录结构
+交叉工具链路径与内核源码路径在 Makefile 中为作者本机路径，编译前需按实际情况修改，见下文「编译方法」。
+
+## 3. 程序结构
 
 ```
 axibram/
-├── Makefile              # 顶层 Makefile
-├── README.md             # 本文档
-├── axibram/              # 内核驱动
-│   ├── axi_bram.c        #   platform 驱动入口（probe / remove）
-│   ├── axibram_chrdev.c  #   字符设备核心（open/release/poll/mmap/ioctl）
-│   ├── axibram_irq.c     #   中断处理（安装/卸载、三种通知方式）
-│   ├── axi_selectmap.c   #   FPGA SelectMap 配置
-│   ├── axibram.h         #   驱动主头文件
-│   └── axibram_ioctl.h   #   ioctl 接口定义（内核/用户态共享）
-├── examples/             # 应用程序
-│   ├── examples.mk       #   应用程序构建文件
-│   ├── driver/           #   用户态接口库
-│   │   ├── axibram_driver.c/h  # 基础驱动接口
-│   │   ├── axibram_uart.c/h    # PL UART
-│   │   ├── axibram_gpio.c/h    # GPIO
-│   │   └── utils.c/h           # 工具函数
-│   ├── irq.c             #   中断/DMA 测试程序（四种方式）
-│   ├── reg.c             #   寄存器读写测试
-│   ├── uart.c            #   串口收发测试
-│   ├── gpio.c            #   GPIO 翻转测试
-│   └── selectmap.c       #   FPGA bitstream 加载
-└── outputs/              # 编译产物（axibram.ko + *.elf）
+├── Makefile               # 顶层构建入口（driver + examples）
+├── axibram/               # 内核驱动源码
+│   ├── axibram.h          # 设备结构体、宏定义、函数声明
+│   ├── axibram_chrdev.c   # 字符设备：file_operations、mmap、ioctl、poll
+│   ├── axibram_irq.c      # 中断安装/卸载、信号发送、三种中断通知
+│   ├── axi_bram.c         # platform 驱动入口：probe / remove
+│   ├── axi_selectmap.c    # SelectMap V7 配置时序
+│   ├── axi_selectmap.h    # SelectMap 寄存器位域定义
+│   ├── axibram_ioctl.h    # ioctl 命令与参数结构定义（内核/用户态共用）
+│   ├── Kbuild             # 内核模块构建规则
+│   ├── Makefile           # 驱动独立编译入口
+│   └── axibram.mk         # 驱动构建配置（被顶层 Makefile include）
+└── examples/              # 用户态示例
+    ├── driver/
+    │   ├── axibram_driver.c/.h  # 驱动访问封装库
+    │   └── utils.c/.h           # 工具函数（StringToDec 等）
+    ├── reg.c              # 寄存器读写示例
+    ├── irq.c              # 中断通知演示示例
+    ├── selectmap.c        # SelectMap 烧写示例
+    ├── makefile           # 示例独立编译入口
+    └── examples.mk        # 示例构建配置（被顶层 Makefile include）
 ```
 
-## 3. 驱动功能
+## 4. 编译方法
 
-### 3.1 寄存器读写
+### 4.1 修改路径
 
-通过 ioctl 直接读写 FPGA 侧寄存器：
+- 顶层 [Makefile](Makefile) 中的 `GNU_PATH`：交叉工具链 bin 目录；
+- [axibram/axibram.mk](axibram/axibram.mk) 中的 `KERNEL_PATH`：内核源码树路径；
+- （若单独用）[axibram/Makefile](axibram/Makefile) 中的 `KDIR`：内核源码树路径。
 
-- `AXIBRAM_IO_READ_REGISTER`：读取寄存器（传入偏移、返回数据）
-- `AXIBRAM_IO_WRITE_REGISTER`：写寄存器（传入偏移和数据）
-
-### 3.2 DMA 内存映射（mmap）
-
-`mmap()` 通过 `dma_alloc_coherent` 分配连续、非缓存的 DMA 内存并映射到用户空间，`munmap()` 时自动释放。主要用于 SelectMap 传输 FPGA bitstream。
-
-还可通过 `AXIBRAM_IO_GET_DMA_ADDR` 获取该缓冲区的 DMA 总线地址（本平台即物理地址），供应用写进 FPGA 侧 DMA 引擎的地址寄存器，实现自定义 DMA 传输。
-
-### 3.3 中断通知（三种方式）
-
-驱动在中断到来时**同时**触发三种通知，应用可任选其一或组合使用：
-
-| 方式 | 触发机制 | 特点 |
-|---|---|---|
-| 实时信号 | `send_sig_info(SIGRTMIN+2)` | 可排队、不丢事件，`si_code` 携带硬件中断号 |
-| select/poll | `wake_up + POLLIN` | 同步查询，可与其它 fd 一起等、带超时 |
-| SIGIO | `kill_fasync(SIGIO)` | 标准 POSIX 异步通知，但高频会丢事件 |
-
-### 3.4 中断触发方式可配置
-
-通过 ioctl 由应用程序指定中断触发方式（上升沿/下降沿/高电平/低电平），不再硬编码。
-
-### 3.5 FPGA SelectMap 配置
-
-`AXIBRAM_IO_SELECT_MAP` 通过 SelectMap 接口向 FPGA 加载 bitstream，内部实现完整的配置状态机（自检、复位、Init_b/Program_b 握手、FIFO 写、Done 状态校验）。
-
-### 3.6 其它
-
-- 版本查询：`AXIBRAM_IO_VERSION`
-- 中断安装/卸载：`AXIBRAM_IO_IRQ`（传 0 卸载，否则传信号号安装）
-
-## 4. 设备节点与映射
-
-| 设备节点 | 用途 |
-|---|---|
-| /dev/axibram0 | 通用（寄存器读写、GPIO、SIM 卡复位） |
-| /dev/axibram2 | FPGA SelectMap 配置 |
-| /dev/axibram3/4/5/7/8/9 | UART 串口 |
-| /dev/axibram6 | SIM 安全卡 |
-
-> 具体映射以设备树配置为准。带中断的 `axibramN` 设备需在设备树里配置 `interrupts` 资源。
-
-### 4.1 设备树节点配置示例
-
-驱动通过 `compatible` 匹配设备树节点，`xlnx,axibram-chrdevN` 对应 `/dev/axibramN`（N = 0 ~ 16）。
-
-```dts
-/ {
-    amba_pl: amba_pl {
-        #address-cells = <1>;
-        #size-cells = <1>;
-        compatible = "simple-bus";
-        ranges;
-
-        /* 寄存器类设备（无中断），映射到 /dev/axibram0 */
-        axibram0: axibram@80000000 {
-            compatible = "xlnx,axibram-chrdev0";
-            reg = <0x80000000 0x10000>;        /* 基地址 0x80000000，大小 64KB */
-        };
-
-        /* 带中断的设备，映射到 /dev/axibram1 */
-        axibram1: axibram@80010000 {
-            compatible = "xlnx,axibram-chrdev1";
-            reg = <0x80010000 0x10000>;
-            interrupt-parent = <&intc>;         /* 中断控制器 */
-            interrupts = <0 29 4>;              /* GIC SPI 29，高电平触发 */
-        };
-    };
-};
-```
-
-**字段说明：**
-
-| 属性 | 必需 | 说明 |
-|---|---|---|
-| `compatible` | 是 | 必须为 `xlnx,axibram-chrdevN`（N = 0~16），决定设备号 `/dev/axibramN` |
-| `reg` | 是 | 寄存器内存映射 `<基地址 大小>`，驱动 ioremap 后用于寄存器读写 |
-| `interrupt-parent` | 中断时需要 | 指向中断控制器（如 GIC 的 `&intc`） |
-| `interrupts` | 中断时需要 | 中断号与触发方式，格式取决于中断控制器 |
-
-> 说明：
-> - 上面 `0x80000000`、`0x80010000` 只是示例地址，实际以 FPGA 工程分配的地址为准；
-> - `interrupts` 的格式依中断控制器而定——Zynq/FMQL 的 ARM GIC 通常是三单元 `<类型 中断号 触发方式>`（0=SPI 共享外设中断，4=高电平，1=上升沿，2=下降沿，8=低电平）；
-> - 设备树里的触发方式只是初始提示，运行时可通过 `AXIBRAM_IO_IRQ_TRIGGER` 重新指定。
-
-## 5. ioctl 接口定义
-
-接口定义统一在 `axibram/axibram_ioctl.h`（内核与用户态共享同一份）。
-
-```c
-#define AXIBRAM_IOCTL_MAGIC 0x34
-
-struct axibram_register {
-    unsigned int offset;   // 寄存器偏移（字节，4 的倍数）
-    unsigned int data;     // 数据
-};
-
-struct axibram_selectmap_transaction {
-    unsigned int size;
-    void *user_addr;
-};
-
-struct axibram_dma_info {
-    unsigned long long dma_addr;   // DMA 总线地址（本平台 = 物理地址）
-    unsigned int       size;
-};
-```
-
-| 命令 | 宏 | 功能 |
-|---|---|---|
-| `AXIBRAM_IO_VERSION` | `_IOR(0x34, 0, unsigned int)` | 读驱动版本号 |
-| `AXIBRAM_IO_READ_REGISTER` | `_IOR(0x34, 1, struct axibram_register)` | 读寄存器 |
-| `AXIBRAM_IO_WRITE_REGISTER` | `_IOW(0x34, 2, struct axibram_register)` | 写寄存器 |
-| `AXIBRAM_IO_SELECT_MAP` | `_IOW(0x34, 3, struct axibram_selectmap_transaction)` | SelectMap 配置 FPGA |
-| `AXIBRAM_IO_IRQ` | `_IOW(0x34, 10, unsigned int)` | 装/卸中断（0 卸载，否则信号号） |
-| `AXIBRAM_IO_IRQ_TRIGGER` | `_IOW(0x34, 11, unsigned int)` | 设置中断触发方式 |
-| `AXIBRAM_IO_GET_DMA_ADDR` | `_IOR(0x34, 12, struct axibram_dma_info)` | 获取 DMA 缓冲区物理地址 |
-
-中断触发方式常量（取值与内核 `IRQF_TRIGGER_*` 一致）：
-
-```c
-#define AXIBRAM_IRQ_TRIGGER_NONE     0x0
-#define AXIBRAM_IRQ_TRIGGER_RISING   0x1   // 上升沿
-#define AXIBRAM_IRQ_TRIGGER_FALLING  0x2   // 下降沿
-#define AXIBRAM_IRQ_TRIGGER_HIGH     0x4   // 高电平
-#define AXIBRAM_IRQ_TRIGGER_LOW      0x8   // 低电平
-```
-
-中断通知信号：`AXIBRAM_IRQ_SIGNAL = (SIGRTMIN + 2)`（用户态定义，避开 glibc/NPTL 保留的 `SIGRTMIN`/`SIGRTMIN+1`）。
-
-## 6. 编译方法
-
-### 6.1 环境准备
-
-交叉编译前需修改两个机器相关的路径：
-
-1. **顶层 [Makefile](Makefile)**：`GNU_PATH` 改为实际交叉编译器目录。
-2. **[axibram/axibram.mk](axibram/axibram.mk)**：`KERNEL_PATH` 改为实际内核源码目录。
-
-### 6.2 编译
+### 4.2 编译命令
 
 ```bash
-make           # 编译驱动 axibram.ko + 全部应用程序
-make clean     # 清理
-make help      # 查看帮助
+make            # 编译驱动 + 示例（等价于 make all）
+make driver     # 只编译内核驱动，生成 axibram/axibram.ko
+make examples   # 只编译示例，生成 reg.elf / irq.elf / StartV7.elf
+make clean      # 清理所有中间文件与输出
 ```
 
-编译产物输出到 `outputs/` 目录：
+产物说明：
 
-```
-outputs/axibram.ko
-outputs/irq.elf
-outputs/reg.elf
-outputs/uart.elf
-outputs/gpio.elf
-outputs/StartV7.elf
-```
+- 驱动：`axibram/axibram.ko`；
+- 示例：`examples/reg.elf`、`examples/irq.elf`、`examples/StartV7.elf`（SelectMap 烧写）。
 
-### 6.3 加载驱动
+### 4.3 装载驱动
+
+将 `axibram.ko` 和示例放到目标板后：
 
 ```bash
 insmod axibram.ko
-# 设备节点由驱动自动创建（/dev/axibram0 ~ /dev/axibram16）
+# 设备树匹配成功后自动生成 /dev/axibramN 节点
 ```
 
-> 注意：不要在 VMware 共享目录 `/mnt/hgfs` 里编译，会有时钟漂移导致 make 误判；建议 `cp -r` 到虚拟机本地目录再编译。
+## 5. 设备树配置
 
-## 7. 应用程序使用说明
+驱动通过 `compatible` 属性匹配设备，支持 `xlnx,axibram-chrdev0` ~ `xlnx,axibram-chrdev16`。每个设备节点至少需要配置寄存器地址区间，需要中断的节点还需配置中断资源。示例：
 
-### 7.1 寄存器读写（reg.elf）
-
-```bash
-./reg.elf read  0           # 读寄存器 0（偏移 = 0 * 4）
-./reg.elf write 0 0x123     # 写寄存器 0，值 0x123
+```dts
+axibram0: axibram@43c00000 {
+    compatible = "xlnx,axibram-chrdev0";
+    reg = <0x43c00000 0x10000>;
+    interrupt-parent = <&intc>;
+    interrupts = <0 29 4>;   /* 中断号与触发方式，驱动通过 irq_get_trigger_type 读取 */
+};
 ```
 
-### 7.2 GPIO 测试（gpio.elf）
+- `reg`：FPGA 外设寄存器物理地址与大小，驱动用 `devm_ioremap_resource` 映射；
+- `interrupts`：可选；触发方式由设备树决定（0x1 上升沿 / 0x2 下降沿 / 0x4 高电平 / 0x8 低电平）。
 
-```bash
-./gpio.elf 0    # 对 GPIO 0 翻转输出波形（pin 范围 0~7，8 为 SF 卡复位）
+## 6. 接口说明
+
+### 6.1 打开设备
+
+```c
+int fd = open("/dev/axibram0", O_RDWR | O_EXCL);
 ```
 
-### 7.3 串口收发（uart.elf）
+- 必须以 **root**（`CAP_SYS_ADMIN`）打开；
+- 必须带 **`O_EXCL`**，且设备为独占打开。
 
-```bash
-./uart.elf 0 115200 aabbcc   # 端口 0，波特率 115200，发送 hex 数据 aabbcc
+### 6.2 ioctl 命令
+
+命令定义见 [axibram_ioctl.h](axibram/axibram_ioctl.h)，magic 号为 `0x34`：
+
+| 命令 | 方向 | 参数类型 | 说明 |
+|---|---|---|---|
+| `AXIBRAM_IO_VERSION` | 读 | `unsigned int` | 读取驱动版本号（当前 `0x01000001`） |
+| `AXIBRAM_IO_READ_REGISTER` | 读 | `struct axibram_register` | 读寄存器（offset 为字节偏移，须 4 对齐） |
+| `AXIBRAM_IO_WRITE_REGISTER` | 写 | `struct axibram_register` | 写寄存器 |
+| `AXIBRAM_IO_SELECT_MAP` | 写 | `struct axibram_data_transaction` | SelectMap 烧写 bitstream |
+| `AXIBRAM_IO_IRQ` | 写 | `unsigned int` | 安装/卸载中断，0 卸载，非 0 为通知信号号 |
+
+```c
+struct axibram_register {
+    unsigned int offset;  /* 寄存器字节偏移 */
+    unsigned int data;    /* 数据 */
+};
+
+struct axibram_data_transaction {
+    unsigned int size;    /* bitstream 字节数 */
+    void *user_addr;      /* 存放 bitstream 的用户地址（须为 mmap DMA 内存） */
+};
 ```
 
-### 7.4 FPGA bitstream 加载（StartV7.elf）
+### 6.3 mmap 双语义
+
+`mmap` 通过 offset 区分两种映射（见 `axibram_mmap`）：
+
+| offset | 含义 | 实现 |
+|---|---|---|
+| `0` | 申请一块 **DMA 一致性内存** | `dma_alloc_coherent` + `dma_mmap_coherent`，非缓存，供 FPGA DMA / SelectMap 数据使用 |
+| `getpagesize()`（一页） | 映射 **FPGA 寄存器** | `remap_pfn_range` + `pgprot_noncached`，直接操作硬件寄存器 |
+
+对应封装（[axibram_driver.c](examples/driver/axibram_driver.c)）：
+
+```c
+void *axibram_driver_malloc(int fd, unsigned int size);  /* DMA 内存，mmap offset=0 */
+void *axibram_driver_mmap(int fd, unsigned int size);    /* 寄存器，mmap offset=页 */
+```
+
+### 6.4 中断通知
+
+应用先 `sigaction` 注册信号处理器，再 `ioctl(AXIBRAM_IO_IRQ, 信号号)` 通知驱动安装中断。驱动使用 `request_threaded_irq`，中断到来时**同时**做三件事：
+
+1. **实时信号**：向安装进程发送指定信号（示例用 `SIGRTMIN+2`），`si_code` 携带硬件中断号，可排队、高频基本不丢；
+2. **select/poll**：置可读标志并唤醒等待者；
+3. **SIGIO**：`kill_fasync` 异步通知（需 `F_SETOWN` + `FASYNC`）。
+
+三种方式对比如下（详见 [axibram_irq.c](axibram/axibram_irq.c) 注释）：
+
+| 特性 | 实时信号 | select/poll | SIGIO |
+|---|---|---|---|
+| 事件排队 | ✅ 排队 | ——（同步查询） | ❌ 合并丢失 |
+| 携带数据 | ✅ `si_code` 带中断号 | ❌ 只有有无 | 弱 |
+| 超时/多 fd 复用 | ❌ | ✅ 天然支持 | ❌ |
+| 处理上下文 | 信号处理器（受限） | 主流程 | 信号处理器 |
+
+## 7. 工作流程
+
+### 7.1 驱动初始化（probe）
+
+```
+platform 总线匹配 compatible
+  → axibram_probe
+    → kzalloc 设备结构
+    → dma_set_mask_and_coherent(32 位)
+    → of_device_get_match_data 取设备 ID，生成设备名 axibramN
+    → axibram_chdrv_init：alloc/register_chrdev_region、class_create、
+      device_create、cdev_add、初始化锁/等待队列/DMA 链表
+    → axibram_chdrv_load_resouce：devm_ioremap_resource 映射寄存器，
+      读取中断号与触发方式
+    → dev_set_drvdata
+```
+
+### 7.2 寄存器读写
+
+```
+应用 ioctl(READ/WRITE_REGISTER)
+  → 驱动 readl/writel(membase + offset)
+```
+或应用 `mmap`（offset=页）后直接读写映射地址。
+
+### 7.3 DMA 内存
+
+```
+应用 mmap(offset=0)
+  → 驱动 dma_alloc_coherent + dma_mmap_coherent
+  → 挂入 dmabuf_list（支持多块）
+  → 应用 munmap / vma close 时 dma_free_coherent 释放
+```
+
+驱动提供 `axibram_user_to_kernel` / `axibram_user_to_dma`，遍历 `dmabuf_list` 将用户虚拟地址转换为内核地址 / DMA 总线地址。
+
+### 7.4 中断处理
+
+```
+应用 ioctl(AXIBRAM_IO_IRQ, 信号号)
+  → 驱动记录进程 + get_task_struct + request_threaded_irq
+硬件中断到来
+  → 硬中断 irq_interrupt_callback（应答中断源）→ IRQ_WAKE_THREAD
+  → 线程 irq_interrupt_thread_callback
+      ├─ send_sig_info 实时信号
+      ├─ 置 poll 可读 + wake_up
+      └─ kill_fasync SIGIO
+应用 close / ioctl(IRQ, 0)
+  → axibram_uninstall_irq：free_irq + put_task_struct
+```
+
+### 7.5 SelectMap 配置
+
+```
+应用读 bitstream 到 mmap DMA 内存
+  → ioctl(AXIBRAM_IO_SELECT_MAP)
+  → 驱动 user_to_kernel 解析内核地址
+  → SelectMap_Cfg_V7 执行 Xilinx 7 系列配置时序：
+    测试寄存器 → 复位 → 分频 → Program_b 启动 → 等 Init_b 拉低 →
+    Rdwr_b 写模式 → 写数据（受 Fifo_full 节流）→ 等 FIFO 空 →
+    停止 → 等 Done 拉高 → 检查 Init_b
+```
+
+每个等待环节均带超时保护，异常时返回错误码而非死循环。
+
+## 8. 示例程序使用
+
+### 8.1 reg —— 寄存器读写
 
 ```bash
-# 将 bitstream 文件 v7_pl_binstream.bin 放到与程序同目录
+./reg.elf read 0          # 读寄存器 0（字地址）
+./reg.elf write 0 0x123   # 向寄存器 0 写入 0x123 并回读
+```
+
+### 8.2 irq —— 中断通知演示
+
+```bash
+./irq.elf [设备名] [方式]
+# 方式：1 实时信号（默认） 2 select/poll 3 SIGIO 4 DMA 内存申请
+```
+
+### 8.3 StartV7 —— SelectMap 烧写
+
+将 bitstream 命名为 `v7_pl_binstream.bin` 放在与程序相同目录，然后：
+
+```bash
 ./StartV7.elf
 ```
 
-### 7.5 中断/DMA 测试（irq.elf）
+程序打开 `/dev/axibram2`，通过 SelectMap 将 bitstream 写入 FPGA。
 
-```bash
-./irq.elf                        # 方式1：实时信号（默认），默认上升沿
-./irq.elf /dev/axibram0 2        # 方式2：select/poll
-./irq.elf /dev/axibram0 3        # 方式3：SIGIO
-./irq.elf /dev/axibram0 4        # 方式4：DMA 物理地址获取
-./irq.elf /dev/axibram0 1 0x2    # 方式1 + 下降沿触发
-```
+## 9. SelectMap 返回码
 
-- 方式 1：实时信号通知（`sighandler` 参数），`pause()` 等待；
-- 方式 2：select/poll 通知，`select()` 等待可读；
-- 方式 3：SIGIO 异步通知（`handler` 参数）；
-- 方式 4：DMA 物理地址获取（mmap 后取物理地址，用于配置 FPGA DMA 引擎）。
+`AXIBRAM_IO_SELECT_MAP` 的返回值（`SelectMap_Cfg_V7`）：
 
-## 8. 用户态接口库（examples/driver）
-
-| 函数 | 功能 |
+| 返回值 | 含义 |
 |---|---|
-| `axibram_driver_open/close` | 打开/关闭设备 |
-| `axibram_driver_malloc/free` | 申请/释放 DMA 映射内存 |
-| `axibram_driver_get_dma_addr` | 获取 DMA 缓冲区物理地址 |
-| `axibram_driver_version` | 获取驱动版本号 |
-| `axibram_driver_readReg/writeReg` | 读/写寄存器 |
-| `axibram_driver_insert_irq` | 注册中断（handler/SIGIO + sighandler/实时信号） |
-| `axibram_driver_set_irq_trigger` | 设置中断触发方式 |
-| `axibram_driver_selectmap` | SelectMap 加载 FPGA bitstream |
-| `MW_GPIO_Open/Close/ReadPin/WritePin` | GPIO 操作 |
-| `PLUART_Open/Close/Send/Read` | PL UART 操作 |
+| 0 | 成功 |
+| -1 | 初始化失败（测试寄存器读写不匹配） |
+| -2 | 启动失败（Init_b / FIFO / Done 超时） |
+| -3 | CRC 校验错误（配置完成后 Init_b 未拉高） |
+| -4 | 未知错误 |
 
-## 9. 注意事项
+## 10. 注意事项
 
-1. **打开设备需 root 权限且必须带 `O_EXCL`**（设备独占访问），用户态 `axibram_driver_open` 已处理。
-2. **中断设备必须配置中断资源**：只有设备树里配了 `interrupts` 的 `axibramN` 设备才有中断，否则安装中断会失败。
-3. **硬中断应答寄存器偏移需按实际硬件修改**：`axibram/axibram_irq.c` 里的 `AXIBRAM_IRQ_STATUS_OFFSET` 是占位值（默认 0），需按 FPGA 实际的中断状态/清除寄存器改成正确偏移和读写方式，否则电平触发的中断会造成中断风暴。
-4. **ioctl 接口定义单源头**：所有命令号、结构体定义都在 `axibram/axibram_ioctl.h`，内核与用户态共用，改接口只改这一处。
-5. **`void *user_addr` 结构体字段有 32/64 位 ABI 隐患**：当前 32 位 ARM、内核与用户态一致所以没问题；若将来出现 64 位用户态（compat），`_IOC_SIZE` 会失配。
+- 设备为 root 独占（`O_EXCL`），同一时刻仅一个进程可打开；
+- DMA 内存由 `dma_alloc_coherent` 申请，需内核命令行配置足够的 CMA（如 `cma=64M`）；
+- `read`/`write` 目前为空实现，数据交互统一通过 `mmap` + `ioctl` 完成；
+- 中断硬处理函数中的「中断源应答/清除」需按实际 FPGA 外设的清除方式（读清/写 1 清）补齐，见 [axibram_irq.c](axibram/axibram_irq.c) 中注释。

@@ -10,19 +10,6 @@
 #include "axibram.h"
 #include <linux/delay.h>
 
-unsigned int checksum(void *data, unsigned int size)
-{
-    unsigned char *pData = (unsigned char *)data;
-    unsigned int it = 0;
-    unsigned int sum = 0;
-    for (it = 0; it < size; ++it)
-    {
-        sum += pData[it];
-    }
-
-    return sum;
-}
-
 /*
 标题：SelectMap V7更新
 参数：
@@ -49,11 +36,10 @@ int SelectMap_Cfg_V7(void __iomem *membase, unsigned int *pdata, unsigned int le
     unsigned int sendcnt = 0 ;
     struct select_map_cfg *SelectMap_cfg_0 = (struct select_map_cfg *)membase;
     unsigned int Wait_cnt = 0;
-    unsigned int sum = 0;
     WordLen = length >> 2; // 将输入的数据长度由字节统计长度变为 4字节统计长度
 
     axibram_log_info("membase = 0x%p.\n", membase);
-    axibram_log_info("******SelectMap Port Test FileSize = %d, sum = 0x%x******\r\n", length, sum);
+    axibram_log_info("******SelectMap Port Test FileSize = %d******\r\n", length);
     // 向基地址写入一个值然后读出，对比正确性
     writel(0x1ACFFC1D, membase + 0x0);
     SelectMap_cfg_0->TEST_REG = 0x1ACFFC1D;
@@ -92,8 +78,14 @@ int SelectMap_Cfg_V7(void __iomem *membase, unsigned int *pdata, unsigned int le
 
     //检查Init_b信号，等待信号拉低
     Init_b_status = SelectMap_cfg_0->Init_b ;
+    Wait_cnt = 0;
     while((Init_b_status&0x01) == 1)
     {
+        if ( Wait_cnt++ > 10000 ) // 约 1s（10000 * 100us）超时保护
+        {
+            axibram_log_info("****** SelectMap cfg failed, Init_b no low ******\r\n");
+            return -2;
+        }
         udelay(100); // 延时等待稳定
         Init_b_status = SelectMap_cfg_0->Init_b ;
         axibram_log_info("******Init_b_status = %d******\r\n", Init_b_status);
@@ -114,8 +106,14 @@ int SelectMap_Cfg_V7(void __iomem *membase, unsigned int *pdata, unsigned int le
 
     //等待10ms,检测Init_b是否拉高 
     Init_b_status = SelectMap_cfg_0->Init_b ;
+    Wait_cnt = 0;
     while((Init_b_status&0x01) == 0 )
     {
+        if ( Wait_cnt++ > 100000 ) // 约 1s（100000 * 10us）超时保护
+        {
+            axibram_log_info("****** SelectMap cfg failed, Init_b no high ******\r\n");
+            return -2;
+        }
         udelay(10);
         Init_b_status = SelectMap_cfg_0->Init_b ;
         axibram_log_info("****** Init_b_status = %d ******\r\n", Init_b_status);
@@ -129,15 +127,22 @@ int SelectMap_Cfg_V7(void __iomem *membase, unsigned int *pdata, unsigned int le
     axibram_log_info("****** Cfg_Start pull up ******\r\n");
 
     //向数据寄存器中循环写入数据
+    Wait_cnt = 0;
     while(WordLen > sendcnt)
     {
         if((SelectMap_cfg_0->Fifo_full & 0x01) == 0)
         {
             writel(pdata[sendcnt], membase + 0x24);
             sendcnt = sendcnt + 1;
+            Wait_cnt = 0; // 有进展则重置超时
         }
-        else 
+        else
         {
+            if ( Wait_cnt++ > 100000 ) // FIFO 一直满，约 10s 超时保护
+            {
+                axibram_log_info("****** SelectMap cfg failed, FIFO full timeout ******\r\n");
+                return -2;
+            }
             udelay(100); // 延时等待稳定
             axibram_log_info("****** write %d %d, 0x%x******\r\n", WordLen, sendcnt, SelectMap_cfg_0->Fifo_full);
             continue;
@@ -146,8 +151,14 @@ int SelectMap_Cfg_V7(void __iomem *membase, unsigned int *pdata, unsigned int le
     
      axibram_log_info("****** wait file empty ***********\r\n");
     //等待底层FIFO数据写入完毕    
+    Wait_cnt = 0;
     while((SelectMap_cfg_0->Fifo_empty & 0x01) == 0)
     {
+        if ( Wait_cnt++ > 100000 ) // 约 10s 超时保护
+        {
+            axibram_log_info("****** SelectMap cfg failed, FIFO empty timeout ******\r\n");
+            return -2;
+        }
         udelay(100); // 延时等待稳定
     }
 

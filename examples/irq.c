@@ -193,19 +193,6 @@ static void demo_dma(const char *devName)
         return;
     }
 
-    // 2. 获取 DMA 物理地址（用于配置 FPGA 侧 DMA 引擎）
-    unsigned int actualSize = 0;
-    unsigned long long phy = axibram_driver_get_dma_addr(filp, &actualSize);
-    if ( 0 == phy )
-    {
-        printf("get dma addr failed.\n");
-        axibram_driver_free(buf, size);
-        axibram_driver_close(filp);
-        return;
-    }
-
-    printf("[方式4 DMA] 虚拟地址=%p 物理地址=0x%llx 大小=%u\n",
-           buf, phy, actualSize);
 
     // 3. 写点数据进缓冲区（dma_alloc_coherent 是非缓存一致内存，设备能直接看到）
     unsigned int *p = (unsigned int *)buf;
@@ -220,98 +207,6 @@ static void demo_dma(const char *devName)
     // axibram_driver_writeReg(filp, DMA_CTRL_REG,  1);  // 启动 DMA
 
     axibram_driver_free(buf, size);
-    axibram_driver_close(filp);
-}
-
-/* FPGA DMA 引擎寄存器偏移（字节，4 的倍数） */
-#define DMA_REG_RESET     0x00   // 写 1 复位
-#define DMA_REG_START     0x04   // 写 1 启动数据发送
-#define DMA_REG_ENABLE    0x08   // 写 1 使能 DMA
-#define DMA_REG_IRQ_EN    0x0C   // 写 1 使能中断
-#define DMA_REG_IRQ_CLR   0x10   // 写 1 清除中断
-#define DMA_REG_LENGTH    0x14   // 要发送的数据长度
-#define DMA_REG_ADDR      0x18   // DMA 的 DDR 物理地址
-#define DMA_REG_STATUS    0x20   // FPGA 中 DMA 状态（读）
-
-/* DMA FIFO 满度描述（状态寄存器低 2 位） */
-static const char *dma_fifo_desc(unsigned int status)
-{
-    switch ( status & 0x3 )
-    {
-        case 0: return "不满 1/4";
-        case 1: return "1/4 满";
-        case 2: return "1/2 满";
-        case 3: return "3/4 满";
-        default: return "未知";
-    }
-}
-
-/* 方式 5：DMA 发送数据 */
-static void demo_dma_send(const char *devName)
-{
-    int filp = axibram_driver_open(devName);
-    if ( -1 == filp )
-    {
-        printf("open driver[%s] failed.\n", devName);
-        return;
-    }
-
-    // 1. 申请 DMA 内存并填入要发送的数据
-    unsigned int length = 1024;   // 要发送的字节数
-    unsigned char *buf = (unsigned char *)axibram_driver_malloc(filp, length);
-    if ( NULL == buf )
-    {
-        printf("dma malloc failed.\n");
-        axibram_driver_close(filp);
-        return;
-    }
-    for ( unsigned int i = 0; i < length; ++i )
-        buf[i] = (unsigned char)(i & 0xFF);
-
-    // 2. 取 DMA 物理地址
-    unsigned int sz = 0;
-    unsigned long long phy = axibram_driver_get_dma_addr(filp, &sz);
-    if ( 0 == phy )
-    {
-        printf("get dma addr failed.\n");
-        axibram_driver_free(buf, length);
-        axibram_driver_close(filp);
-        return;
-    }
-
-    printf("[方式5 DMA发送] 长度=%u 物理地址=0x%llx\n", length, phy);
-
-    // 3. 复位 DMA（写 1 复位，再写 0 结束复位）
-    axibram_driver_writeReg(filp, DMA_REG_RESET, 1);
-    usleep(100);
-    axibram_driver_writeReg(filp, DMA_REG_RESET, 0);
-
-    // 4. 使能 DMA
-    axibram_driver_writeReg(filp, DMA_REG_ENABLE, 1);
-
-    // 5. 写 DDR 物理地址 + 数据长度
-    axibram_driver_writeReg(filp, DMA_REG_ADDR, (unsigned int)phy);
-    axibram_driver_writeReg(filp, DMA_REG_LENGTH, length);
-
-    // 6. 若用中断通知完成，使能中断并注册中断处理器：
-    //    axibram_driver_writeReg(filp, DMA_REG_IRQ_EN, 1);
-    //    axibram_driver_insert_irq(filp, NULL, rt_signal_handler);
-
-    // 7. 启动数据发送
-    axibram_driver_writeReg(filp, DMA_REG_START, 1);
-
-    // 8. 轮询 DMA FIFO 状态（观察发送过程中的 FIFO 满度）
-    for ( int i = 0; i < 10; ++i )
-    {
-        unsigned int status = axibram_driver_readReg(filp, DMA_REG_STATUS);
-        printf("  DMA FIFO 状态[%d] = %s\n", i, dma_fifo_desc(status));
-        usleep(10000);   // 10ms
-    }
-
-    // 9. 若使用中断，发送完成后清除中断标志
-    axibram_driver_writeReg(filp, DMA_REG_IRQ_CLR, 1);
-
-    axibram_driver_free(buf, length);
     axibram_driver_close(filp);
 }
 
@@ -330,7 +225,6 @@ int main(int argc, char *const *argv)
         case 2:  demo_poll(devName);  break;
         case 3:  demo_sigio(devName); break;
         case 4:  demo_dma(devName);   break;
-        case 5:  demo_dma_send(devName); break;
         case 1:
         default: demo_signal(devName); break;
     }

@@ -14,6 +14,95 @@
 
 static struct axibram_device *g_axibram_dev[AXIBRAM_DEVICE_MAX_NUM];
 
+
+static bool valid_dma_request(void *user_start, size_t dma_size, void *user_addr,
+                              size_t user_size)
+{
+    return user_start <= user_addr &&
+           (char *)user_addr + user_size <= (char *)user_start + dma_size;
+}
+
+/*
+标题：用户虚拟地址转内核/物理地址
+参数：
+   dev
+       [in] 字符设备驱动
+    user_addr
+        [in] 用户虚拟地址
+    size
+        [in] 用户虚拟地址大小
+ 返回值：
+    0:成功
+作    者：
+日    期：2026-11-3
+备    注：
+    将给定的用户空间虚拟地址转换为内核地址，转换失败时返回NULL
+*/
+void* axibram_user_to_kernel(struct axibram_device *dev, void *user_addr,
+                                  size_t size)
+{
+    bool valid;
+    unsigned int offset;
+    struct list_head *iter;
+    struct axibram_dma_allocation *dma_alloc;
+
+    // 遍历当前设备DMA缓存列表，查找与给定用户空间地址匹配的DMA缓存
+    list_for_each(iter, &dev->dmabuf_list)
+    {
+        dma_alloc = container_of(iter, struct axibram_dma_allocation, list);
+        valid = valid_dma_request(dma_alloc->user_addr, dma_alloc->size,
+                                  user_addr, size);
+        if (valid) 
+        {
+            void *kernel_addr = dma_alloc->kern_addr;
+            offset = (unsigned int)(user_addr - dma_alloc->user_addr);
+            if ( offset > 0 )
+            {
+                kernel_addr = (char*)dma_alloc->kern_addr + offset;
+            }
+
+            axibram_log_info("axibram user to kernel addr offset: %d, kernel addr:0x%p.\n",
+                            offset, kernel_addr);
+            return kernel_addr;
+        }
+    }
+
+    // 未找到匹配的内核缓存
+    return NULL;
+}
+
+dma_addr_t axibram_user_to_dma(struct axibram_device *dev, void *user_addr,
+                                size_t size)
+{
+    bool valid;
+    dma_addr_t offset;
+    struct list_head *iter;
+    struct axibram_dma_allocation *dma_alloc;
+
+    // 遍历当前设备DMA缓存列表，查找与给定用户空间地址匹配的DMA缓存
+    list_for_each(iter, &dev->dmabuf_list)
+    {
+        dma_alloc = container_of(iter, struct axibram_dma_allocation, list);
+        valid = valid_dma_request(dma_alloc->user_addr, dma_alloc->size,
+                                  user_addr, size);
+        if (valid) 
+        {
+            dma_addr_t dma_addr = dma_alloc->dma_addr;
+            offset = (dma_addr_t)(user_addr - dma_alloc->user_addr);
+            if ( offset > 0 )
+            {
+                dma_addr = dma_alloc->dma_addr + offset;
+            }
+
+            axibram_log_info("axibram user to kernel addr offset: %d, phy addr:0x%x.\n",
+                            offset, dma_addr);
+            return dma_addr;
+        }
+    }
+
+    // 未找到匹配的内核缓存
+    return (dma_addr_t)NULL;
+}
 //---------------------------------------------------------------------------
 //       device resource
 //---------------------------------------------------------------------------
@@ -152,16 +241,8 @@ int axibram_chdrv_load_resouce(struct axibram_device *dev)
 */
 void axibram_chdrv_release_resource(struct axibram_device *dev)
 {
-    // 释放内存资源
-    int it = 0;
-    for ( it = 0; it < AXIBRAM_RSOURCE_MAX_NUM; ++it )
-    {
-        if ( dev->resource.mem[it].membase )
-        {
-            release_mem_region(dev->resource.mem[it].start, dev->resource.mem[it].size);
-        }
-    }
-   
+    // 因为使用了 devm_ioremap_resource()，所以不需要手动释放内存映射资源
+    (void)dev;
 }
 //---------------------------------------------------------------------------
 //      File Operations
@@ -174,7 +255,7 @@ static int axibram_open(struct inode *inode, struct file *filp)
     {
         axibram_log_err("Only root can open this device.\n");
         return -EINVAL;
-    } else if ( !(filp->f_flags & O_EXCL) )
+    } else if ( !(filp->f_flags & O_EXCL) ) // 必须使用O_EXCL属性打开
     {
         axibram_log_err("O_EXCL must be specified for open().\n");
         return -EINVAL;
@@ -269,8 +350,10 @@ static void axibram_vma_close(struct vm_area_struct *vma)
                     dma_alloc->kern_addr, dma_alloc->user_addr, dma_alloc->size);
     dma_free_coherent(&dev->pdev->dev, dma_alloc->size, dma_alloc->kern_addr,
                     dma_alloc->dma_addr);
-    dev->dma_alloc = NULL;
     vma->vm_private_data = NULL;
+    
+    // 从DMA列表中移除 allocation 结构，并释放 allocation 结构的内存
+    list_del(&dma_alloc->list);
     kfree(dma_alloc);
 }
 
@@ -284,6 +367,45 @@ int axibram_mmap(struct file *filp, struct vm_area_struct * vma)
     int rc = 0;
     struct axibram_device *dev = filp->private_data;
     struct axibram_dma_allocation *dma_alloc;
+    size_t size = vma->vm_end - vma->vm_start;
+    // 获取用户传进来的字节偏移量
+    axibram_log_info("mmp remap offset 0x%lx.\n", vma->vm_pgoff);
+    if ( 0 != vma->vm_pgoff )
+    {
+        if ( size > dev->resource.mem[0].size )
+        {
+            axibram_log_err("Unable to remap address 0x%p to userspace address 0x%p, size %zu.\n",
+                           dev->resource.mem[0].membase, (void *)vma->vm_start, size);
+            return -EAGAIN;
+        } else  if ( dev->resource.mem[0].membase )
+        {
+            // 设置 VMA 属性标志：I/O 内存、禁止物理页扩展、禁止被 dump 核心转储
+            vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP;
+            // 强制关闭 Cache。寄存器操作必须直接作用于硬件
+            vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+            // 建立映射
+            rc = remap_pfn_range(vma, vma->vm_start,
+                                 (dev->resource.mem[0].start >> PAGE_SHIFT),
+                                 size, vma->vm_page_prot);
+            if ( rc < 0 )
+            {
+                axibram_log_err("Unable to remap address 0x%p to userspace address 0x%p, size %zu.\n",
+                               dev->resource.mem[0].membase, (void *)vma->vm_start, size);
+                return -EAGAIN;
+            } else
+            {
+                axibram_log_info("mmp remap address 0x%p to userspace address 0x%p, size %zu.\n",
+                                dev->resource.mem[0].membase, (void *)vma->vm_start, size);
+                return 0;
+            }
+        } else
+        {
+            axibram_log_err("Unable to remap address 0x%p to userspace address 0x%p, size %zu.\n",
+                           dev->resource.mem[0].membase, (void *)vma->vm_start, size);
+            return -EAGAIN;
+        }
+    }
+    
 
     dma_alloc = (struct axibram_dma_allocation *)kmalloc(sizeof(struct axibram_dma_allocation), GFP_KERNEL);
     if (NULL == dma_alloc)
@@ -293,8 +415,8 @@ int axibram_mmap(struct file *filp, struct vm_area_struct * vma)
     }
 
     dma_alloc->private_data = dev;
-    dma_alloc->size = vma->vm_end - vma->vm_start;
-    dma_alloc->user_addr = (void *)vma->vm_start;
+    dma_alloc->size         = size;
+    dma_alloc->user_addr    = (void *)vma->vm_start;
 
     // Configure the DMA device
     of_dma_configure(&dev->pdev->dev, NULL);
@@ -303,12 +425,13 @@ int axibram_mmap(struct file *filp, struct vm_area_struct * vma)
     // 内核侧：申请一致性 DMA 内存（ARM 上返回的是 uncached 内核地址）
     dma_alloc->kern_addr = dma_alloc_coherent(&dev->pdev->dev, dma_alloc->size,
                                               &dma_alloc->dma_addr, GFP_KERNEL);
-    if (NULL == dma_alloc->kern_addr)
+    if ( NULL == dma_alloc->kern_addr )
     {
         axibram_log_err("Unable to allocate contiguous DMA memory region of size "
                        "%zu.\n",
                        dma_alloc->size);
-        axibram_log_err("Please make sure that you specified cma=<size> on the Kernel command line, and the size is large enouge.\n");
+        axibram_log_err("Please make sure that you specified cma=<size> on the "
+                        "Kernel command line, and the size is large enouge.\n");
         kfree(dma_alloc);
         return -ENOMEM;
     }
@@ -331,10 +454,14 @@ int axibram_mmap(struct file *filp, struct vm_area_struct * vma)
                         dma_alloc->kern_addr, dma_alloc->user_addr, dma_alloc->size);
     }
 
-    dev->dma_alloc = dma_alloc;
     vma->vm_ops = &axibram_vm_ops;
     vma->vm_private_data = dma_alloc;
+
+    // 如果当前进程被分叉，则不要复制此内存区域。
     vma->vm_flags |= VM_DONTCOPY;
+
+    // Add the allocation to the driver's list of DMA buffers
+    list_add(&dma_alloc->list, &dev->dmabuf_list);
 
     return 0;
 }
@@ -348,6 +475,7 @@ static long axibram_ioctl(struct file *filp, unsigned int cmd, unsigned long dat
     if ( _IOC_TYPE(cmd) != AXIBRAM_IOCTL_MAGIC )
     {
         axibram_log_err("IOCTL command magic number does not match.\n");
+        ret = -EFAULT;
     }
 
     switch ( cmd )
@@ -398,7 +526,8 @@ static long axibram_ioctl(struct file *filp, unsigned int cmd, unsigned long dat
         }
         case AXIBRAM_IO_SELECT_MAP:
         {
-            struct axibram_selectmap_transaction file;
+            void *kernel_addr = NULL;
+            struct axibram_data_transaction file;
             if ( copy_from_user(&file, arg_ptr, sizeof(file)) != 0 )
             {
                 axibram_log_info("Unable to copy transfer info from userspace for AXIBRAM_IO_SELECT_MAP.\n");
@@ -406,7 +535,11 @@ static long axibram_ioctl(struct file *filp, unsigned int cmd, unsigned long dat
             }
 
             axibram_log_info("start slectmap addr=%p, size=%d\r\n", file.user_addr, file.size);
-            SelectMap_Cfg_V7(dev->resource.mem[0].membase, (unsigned int *)dev->dma_alloc->kern_addr, file.size);
+            kernel_addr = axibram_user_to_kernel(dev, file.user_addr, file.size);
+            if ( kernel_addr )
+            {
+                SelectMap_Cfg_V7(dev->resource.mem[0].membase, (unsigned int *)kernel_addr, file.size);
+            }
             break;
         }
         case AXIBRAM_IO_IRQ: // 安装卸载中断
@@ -417,6 +550,13 @@ static long axibram_ioctl(struct file *filp, unsigned int cmd, unsigned long dat
                 axibram_uninstall_irq(dev);
             } else
             {
+                // 重复安装：先卸载旧的（内部 free_irq 并 put_task_struct 旧进程），
+                // 避免 task_struct 引用泄漏，也避免重复 request_irq 返回 -EBUSY。
+                if ( dev->irq_installed )
+                {
+                    axibram_uninstall_irq(dev);
+                }
+
                 dev->sinfo.process = get_current();
                 get_task_struct(dev->sinfo.process); // 增加引用计数，防止进程先退出后指针悬空
                 dev->sinfo.notify_signal = data;
@@ -425,29 +565,12 @@ static long axibram_ioctl(struct file *filp, unsigned int cmd, unsigned long dat
                 if ( 0 != axibram_install_irq(dev) )
                 {
                     // 安装失败，回退引用计数
-                    put_task_struct(dev->sinfo.process);
-                    dev->sinfo.process = NULL;
+                    axibram_uninstall_irq(dev);
                     ret = -EFAULT;
                 }
             }
 
 
-            break;
-        }
-        case AXIBRAM_IO_GET_DMA_ADDR: // 获取 DMA 缓冲区物理地址
-        {
-            struct axibram_dma_info info;
-            if ( NULL == dev->dma_alloc )
-            {
-                axibram_log_err("DMA buffer not allocated yet (mmap first).\n");
-                ret = -EINVAL;
-            } else
-            {
-                info.dma_addr = (unsigned long long)dev->dma_alloc->dma_addr;
-                info.size     = dev->dma_alloc->size;
-                if ( copy_to_user(arg_ptr, &info, sizeof(info)) )
-                    ret = -EFAULT;
-            }
             break;
         }
     }
@@ -519,12 +642,11 @@ static struct file_operations axibram_file_ops = {
 int axibram_chdrv_init(struct axibram_device *dev, const int dev_cnt)
 {
     int rc = 0;
-    // 存储指向axidma设备的全局指针
-    g_axibram_dev[dev_cnt] = dev;
     dev->dev_cnt = dev_cnt;
     dev->sinfo.notify_signal = 0x0;
     if ( 0 == dev_cnt )
     {
+        // Allocate a major and minor number region for the character device
         rc = alloc_chrdev_region(&dev->dev_num, 0, 1, AXIBRAM_DEV_NAME);
         if ( rc < 0 )
         {
@@ -532,6 +654,7 @@ int axibram_chdrv_init(struct axibram_device *dev, const int dev_cnt)
             goto ret;
         }
 
+        // Create a device class for our device
         dev->dev_class = class_create(THIS_MODULE, AXIBRAM_DEV_NAME);
         if ( IS_ERR(dev->dev_class) )
         {
@@ -542,8 +665,14 @@ int axibram_chdrv_init(struct axibram_device *dev, const int dev_cnt)
     } else
     {
         dev->dev_num = MKDEV(MAJOR(g_axibram_dev[0]->dev_num), dev_cnt);
-        dev->dev_class = g_axibram_dev[0]->dev_class;
         rc = register_chrdev_region(dev->dev_num, 1, AXIBRAM_DEV_NAME);
+        if ( rc < 0 )
+        {
+            axibram_log_err("Unable to register charachter device region.\n");
+            goto ret;
+        }
+
+        dev->dev_class = g_axibram_dev[0]->dev_class;
     }
 
     // Create a device for our module. this will create a file on the filesystem.
@@ -569,12 +698,19 @@ int axibram_chdrv_init(struct axibram_device *dev, const int dev_cnt)
     mutex_init(&dev->poll_lock);
     init_waitqueue_head(&dev->poll_wait);
 
+    // Initialize the list for DMA mmap'ed allocations
+    INIT_LIST_HEAD(&dev->dmabuf_list);
+
+    g_axibram_dev[dev_cnt] = dev;  // 成功后才挂进全局数组
     return 0;
 
 cleanup_device:
     device_destroy(dev->dev_class, dev->dev_num);
 cleanup_class:
-    class_destroy(dev->dev_class);
+    if ( 0 == dev_cnt ) // 只销毁自己创建的 class
+    {
+        class_destroy(dev->dev_class);
+    }
 cleanup_chrdev_region:
     unregister_chrdev_region(dev->dev_num, 1);
 ret:
@@ -603,5 +739,5 @@ void axibram_chdrv_exit(struct axibram_device *dev, const int dev_cnt)
     }
 
     unregister_chrdev_region(dev->dev_num, 1);
-    g_axibram_dev[dev_cnt] = NULL;
+    g_axibram_dev[dev->dev_cnt] = NULL;
 }

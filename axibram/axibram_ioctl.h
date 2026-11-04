@@ -32,7 +32,7 @@ struct axibram_register
     unsigned int data;   // 数据
 };
 
-struct axibram_selectmap_transaction
+struct axibram_data_transaction
 {
     unsigned int  size;
     void         *user_addr;
@@ -49,28 +49,10 @@ struct axibram_selectmap_transaction
 #define AXIBRAM_IO_READ_REGISTER    _IOR(AXIBRAM_IOCTL_MAGIC, 1, struct axibram_register)
 // 向寄存器写入值
 #define AXIBRAM_IO_WRITE_REGISTER   _IOW(AXIBRAM_IOCTL_MAGIC, 2, struct axibram_register)
-
 // Select map V7启动
-#define AXIBRAM_IO_SELECT_MAP       _IOW(AXIBRAM_IOCTL_MAGIC, 3, struct axibram_selectmap_transaction)
-
+#define AXIBRAM_IO_SELECT_MAP       _IOW(AXIBRAM_IOCTL_MAGIC, 3, struct axibram_data_transaction)
 // 安装/卸载中断，0：卸载中断，否则安装中断
 #define AXIBRAM_IO_IRQ              _IOW(AXIBRAM_IOCTL_MAGIC, 10, unsigned int)
 
-// DMA 缓冲区物理地址信息（用于配置 FPGA 侧 DMA 引擎）
-struct axibram_dma_info
-{
-    unsigned long long dma_addr;  // DMA 总线地址（本平台 = 物理地址）
-    unsigned int       size;      // 缓冲区大小
-};
-
-// 获取 mmap DMA 缓冲区的物理地址
-#define AXIBRAM_IO_GET_DMA_ADDR     _IOR(AXIBRAM_IOCTL_MAGIC, 11, struct axibram_dma_info)
-
-// RX 环形缓冲控制头（放在 mmap 内存偏移 0，驱动与应用层共享）
-struct axibram_rx_ring
-{
-    volatile unsigned int head;   // 驱动写位置（相对环形区起点）
-    volatile unsigned int tail;   // 应用层读位置（相对环形区起点）
-};
 
 #endif

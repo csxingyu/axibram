@@ -10,15 +10,13 @@ LIBS   :=  -lm -lpthread -ldl
 
 EX_DIR := app
 
-SOURCES = $(APP_PATH)/driver/axibram_driver.c  $(APP_PATH)/driver/axibram_uart.c $(APP_PATH)/driver/axibram_gpio.c $(APP_PATH)/driver/utils.c
+SOURCES = $(APP_PATH)/driver/axibram_driver.c   $(APP_PATH)/driver/utils.c
 # 目标文件 *.o
 OBJS := $(patsubst %.c, %.o, $(SOURCES))
 #目标文件 *.d
 DEPS := $(patsubst %.o, %.d, $(OBJS))
 
 
-UART_TARGETS := $(APP_PATH)/uart.elf
-GPIO_TARGETS := $(APP_PATH)/gpio.elf
 REG_TARGETS := $(APP_PATH)/reg.elf
 SELECTMAP_TARGETS := $(APP_PATH)/StartV7.elf
 IRQ_TARGETS      := $(APP_PATH)/irq.elf
@@ -26,26 +24,12 @@ IRQ_TARGETS      := $(APP_PATH)/irq.elf
 .PHONY: examples examples_clean
 
 # 面向用户的驱动程序编译目标
-examples:  $(UART_TARGETS) $(GPIO_TARGETS) $(REG_TARGETS) ${SELECTMAP_TARGETS} $(IRQ_TARGETS)
-	@cp $(UART_TARGETS) $(OUTPUT_DIR)
-	@cp $(GPIO_TARGETS) $(OUTPUT_DIR)
+examples:  $(REG_TARGETS) ${SELECTMAP_TARGETS} $(IRQ_TARGETS)
 	@cp $(REG_TARGETS) $(OUTPUT_DIR)
 	@cp $(SELECTMAP_TARGETS) $(OUTPUT_DIR)
 	@cp $(IRQ_TARGETS) $(OUTPUT_DIR)
 
 #生成目标程序
-$(UART_TARGETS):$(OBJS) $(APP_PATH)/uart.o
-	@echo -e "\033[32m Building target:[ $@ - Debug " $(APP_PATH)" ] \033[0m" 
-	-@echo 'Invoking: GCC C Linker'
-	$(CC) $(LIBPATH) $(OBJS) $(APP_PATH)/uart.o  -o $@ $(LIBS)
-	@echo -e "\033[31m Finished building target: $@ \033[0m"
-
-$(GPIO_TARGETS):$(OBJS) $(APP_PATH)/gpio.o
-	@echo -e "\033[32m Building target:[ $@ - Debug " $(APP_PATH)" ] \033[0m" 
-	-@echo 'Invoking: GCC C Linker'
-	$(CC) $(LIBPATH) $(OBJS) $(APP_PATH)/gpio.o  -o $@ $(LIBS)
-	@echo -e "\033[31m Finished building target: $@ \033[0m"
-
 $(REG_TARGETS):$(OBJS) $(APP_PATH)/reg.o
 	@echo -e "\033[32m Building target:[ $@ - Debug " $(APP_PATH)" ] \033[0m" 
 	-@echo 'Invoking: GCC C Linker'

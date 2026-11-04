@@ -68,6 +68,18 @@ void axibram_driver_close(int filp);
 */
 void *axibram_driver_malloc(int filp, unsigned int size);
 void axibram_driver_free(void *dma_addr, unsigned int size);
+/*
+标题：映射寄存器内存
+参数:
+	fd
+		[in] axibram_driver_open返回的文件描述符 
+	size
+		[in] 要申请或释放内存大小
+	addr
+		[in] 要释放的dma内存，通过axibram_driver_mmap获取
+*/
+void *axibram_driver_mmap(int filp, unsigned int size);
+void axibram_driver_munmap(void *addr, unsigned int size);
 
 // 获取驱动版本号
 unsigned int axibram_driver_version(int filp);
@@ -111,20 +123,6 @@ int axibram_driver_writeReg(int filp, unsigned int reg, unsigned int value);
 	0：成功，-1：失败
 */
 int axibram_driver_insert_irq(int filp, __sighandler_t handler, void (*sighandler) (int, siginfo_t *, void *));
-
-
-/*
-标题：获取 DMA 缓冲区物理地址
-参数：
-	filp
-		[in] axibram_driver_open返回的文件描述符
-	size
-		[out] 返回 DMA 缓冲区大小，可为 NULL
-返回值：
-	DMA 总线地址（本平台 = 物理地址），失败返回 0
-*/
-unsigned long long axibram_driver_get_dma_addr(int filp, unsigned int *size);
-
 
 /*
 标题：selectmap启动

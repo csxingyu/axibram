@@ -6,20 +6,6 @@
 #include <sys/stat.h>
 #include "driver/axibram_driver.h"
 
-unsigned int checksum(void *data, unsigned int size)
-{
-    unsigned char *pData = (unsigned char *)data;
-    unsigned int it = 0;
-    unsigned int sum = 0;
-    for (it = 0; it < size; ++it )
-    {
-        sum += pData[it];
-    }
-
-    return sum;
-}
-
-
 
 // 获取当前程序完整路径
 int GetModulePath(char *lpszPath, int size)
@@ -37,17 +23,6 @@ int GetModulePath(char *lpszPath, int size)
     return len;
 }
 
-
-int FileExists(char *szFileName)
-{
-    struct stat st;
-    if ( stat(szFileName, &st) == 0 )
-    {
-        return st.st_size;
-    }
-
-    return 0;
-}
 
 int main(int argc, char *const *argv)
 {

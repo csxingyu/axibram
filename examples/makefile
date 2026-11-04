@@ -22,41 +22,15 @@ OBJS := $(patsubst %.c, %.o, $(SOURCES))
 #目标文件 *.d
 DEPS := $(patsubst %.o, %.d, $(OBJS))
 
-
-SIM_TARGETS := sim.elf
-
-UART_TARGETS := uart.elf
-
-GPIO_TARGETS := gpio.elf
-
 REG_TARGETS := reg.elf
-
 SELECTMAP_TARGETS := selectmap.elf
 
 .PHONY: all clean 
 # 面向用户的驱动程序编译目标
-all: $(SIM_TARGETS) $(UART_TARGETS) $(GPIO_TARGETS) $(REG_TARGETS) ${SELECTMAP_TARGETS} $(OUTPUT_DIR)
+all: $(GPIO_TARGETS) $(REG_TARGETS) ${SELECTMAP_TARGETS} $(OUTPUT_DIR)
 
 
 #生成目标程序
-$(SIM_TARGETS):$(OBJS) sim.o driver/simcode.o
-	@echo -e "\033[32m Building target:[ $@ - Debug " $(PWD)" ] \033[0m" 
-	-@echo 'Invoking: GCC C Linker'
-	$(CC) $(LIBPATH) $(OBJS) sim.o driver/simcode.o  -o $@ $(LIBS)
-	@echo -e "\033[31m Finished building target: $@ \033[0m"
-
-$(UART_TARGETS):$(OBJS) uart.o
-	@echo -e "\033[32m Building target:[ $@ - Debug " $(PWD)" ] \033[0m" 
-	-@echo 'Invoking: GCC C Linker'
-	$(CC) $(LIBPATH) $(OBJS) uart.o  -o $@ $(LIBS)
-	@echo -e "\033[31m Finished building target: $@ \033[0m"
-
-$(GPIO_TARGETS):$(OBJS) gpio.o
-	@echo -e "\033[32m Building target:[ $@ - Debug " $(PWD)" ] \033[0m" 
-	-@echo 'Invoking: GCC C Linker'
-	$(CC) $(LIBPATH) $(OBJS) gpio.o  -o $@ $(LIBS)
-	@echo -e "\033[31m Finished building target: $@ \033[0m"
-
 $(REG_TARGETS):$(OBJS) reg.o
 	@echo -e "\033[32m Building target:[ $@ - Debug " $(PWD)" ] \033[0m" 
 	-@echo 'Invoking: GCC C Linker'

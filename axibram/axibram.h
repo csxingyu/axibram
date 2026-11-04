@@ -86,11 +86,12 @@ typedef struct axibram_resource
 // DMA
 struct axibram_dma_allocation
 {
-    size_t size;         // Size of the buffer
-    void *user_addr;     // User virtual address of the buffer
-    void *kern_addr;     // Kernel virtual address of the buffer
-    dma_addr_t dma_addr; // DMA bus address of the buffer
+    size_t size;         // Size of the buffer（内存大小）
+    void *user_addr;     // User virtual address of the buffer（用户地址）
+    void *kern_addr;     // Kernel virtual address of the buffer（内核地址）
+    dma_addr_t dma_addr; // DMA bus address of the buffer（物理地址）
     void *private_data;  // DMA私有数据
+    struct list_head list;// List node pointers for allocation list
 };
 
 struct axibram_siginfo
@@ -117,7 +118,7 @@ typedef struct axibram_device
     struct mutex poll_lock; // 用户数据事件锁
     void *private_data;
 
-    struct axibram_dma_allocation *dma_alloc;      // mmap 申请的 DMA 内存（SelectMAP 加载等）
+    struct list_head dmabuf_list;   // mmap 申请的 DMA 内存 list
     struct axibram_dma_allocation *dma_irq_alloc;  // DMA 收发/中断初始化申请的内存
 
 	struct axibram_siginfo   sinfo; // 注册中断信息
@@ -208,6 +209,27 @@ void axibram_send_signal_ex(struct task_struct *task, int signo, int code);
 */
 int axibram_install_irq(struct axibram_device *dev);
 void axibram_uninstall_irq(struct axibram_device *dev);
+
+/*
+标题：用户虚拟地址转内核/物理地址
+参数：
+   dev
+       [in] 字符设备驱动
+    user_addr
+        [in] 用户虚拟地址
+    size
+        [in] 用户虚拟地址大小
+ 返回值：
+    0:成功
+作    者：
+日    期：2025-05-22
+备    注：
+    将给定的用户空间虚拟地址转换为DMA地址，转换失败时返回NULL
+*/
+void* axibram_user_to_kernel(struct axibram_device *dev, void *user_addr, 
+                                size_t size);
+dma_addr_t axibram_user_to_dma(struct axibram_device *dev, void *user_addr,
+                                size_t size);
 #endif
 
 

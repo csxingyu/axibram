@@ -40,12 +40,12 @@ static int axibram_probe(struct platform_device *pdev)
     {
         kfree(dev);
         axibram_log_err("AXI bram probe is error (%d).\n", rc);
-    } else
-    {
-        ++probe_device_num;
-        dev_set_drvdata(&pdev->dev, dev);
-        axibram_log_info("AXI bram probe is OK, name = %s.\n", dev->chrdev_name);
-    }
+		return rc;
+    } 
+
+	++probe_device_num;
+	dev_set_drvdata(&pdev->dev, dev);
+	axibram_log_info("AXI bram probe is OK, name = %s.\n", dev->chrdev_name);
 
     axibram_chdrv_load_resouce(dev);
 	if ( 0 == dev->resource.memCount )

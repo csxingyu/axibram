@@ -17,12 +17,12 @@ int axibram_driver_open(const char *driverName)
     int filp = open(driverName, O_RDWR | O_EXCL);
     if ( -1 == filp )
     {
-    	printf("open(\"%s\", O_RDWR | O_SYNC) error\r\n", driverName);
+    	printf("open(\"%s\", O_RDWR | O_EXCL) error\r\n", driverName);
     	return -1;
     } else
     {
 		unsigned long ver = axibram_driver_version(filp);
-    	printf("open(\"%s\", O_RDWR | O_SYNC)(0x%x) success. driver version V%x.%x.%x.%x.\r\n", driverName, filp,
+    	printf("open(\"%s\", O_RDWR | O_EXCL)(0x%x) success. driver version V%x.%x.%x.%x.\r\n", driverName, filp,
                    (ver >> 24) & 0xFF , (ver >> 16) & 0xFF, (ver >> 8) & 0xFF, ver & 0xFF);
     }
 
@@ -59,6 +59,26 @@ void *axibram_driver_malloc(int filp, unsigned int size)
 }
 
 void axibram_driver_free(void *addr, unsigned int size)
+{
+    munmap(addr, size);
+}
+
+/*
+标题：映射寄存器内存
+参数:
+	fd
+		[in] axibram_driver_open返回的文件描述符 
+	size
+		[in] 要申请或释放内存大小
+	addr
+		[in] 要释放的dma内存，通过axibram_driver_mmap获取
+*/
+void *axibram_driver_mmap(int filp, unsigned int size)
+{
+    return mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, filp, getpagesize()); 
+}
+
+void axibram_driver_munmap(void *addr, unsigned int size)
 {
     munmap(addr, size);
 }
@@ -121,7 +141,7 @@ int axibram_driver_writeReg(int filp, unsigned int reg, unsigned int value)
 	handler
 		[in] SIGIO信号回调函数，暂未用到
 	sighandler
-		[in] 自定义信号回调函数，暂未用到
+		[in] 自定义信号回调函数
 返回值：
 	返回驱动文件描述符
 */
@@ -165,27 +185,6 @@ int axibram_driver_insert_irq(int filp, __sighandler_t handler, void (*sighandle
 
 
 /*
-标题：获取 DMA 缓冲区物理地址
-参数：
-	filp
-		[in] axibram_driver_open返回的文件描述符
-	size
-		[out] 返回 DMA 缓冲区大小，可为 NULL
-返回值：
-	DMA 总线地址（本平台 = 物理地址），失败返回 0
-*/
-unsigned long long axibram_driver_get_dma_addr(int filp, unsigned int *size)
-{
-    struct axibram_dma_info info;
-    if ( -1 == ioctl(filp, AXIBRAM_IO_GET_DMA_ADDR, &info) )
-        return 0;
-
-    if ( size )
-        *size = info.size;
-    return info.dma_addr;
-}
-
-/*
 标题：selectmap启动
 参数：
 	filp
@@ -202,10 +201,10 @@ int axibram_driver_selectmap(int filp, const char *fileName)
 {
     // 读取文件大小
     int    fileLength = 0;
-    struct axibram_selectmap_transaction tran;
+    struct axibram_data_transaction tran;
     struct stat info;
     int    rc = 0;
-    int    fp = 0; // 打开文件句柄
+    FILE  *fp = 0; // 打开文件句柄
 
     if (0x0 != stat(fileName, &info))
     {
@@ -217,7 +216,7 @@ int axibram_driver_selectmap(int filp, const char *fileName)
     }
 
     fp = fopen(fileName, "rb");
-    if (NULL == fp)
+    if ( NULL == fp)
     {
         printf("open file %s failed.\n", fileName);
         return -2;
@@ -228,12 +227,12 @@ int axibram_driver_selectmap(int filp, const char *fileName)
     if ( NULL == tran.user_addr )
     {
         printf("selectmap malloc memory failed.\n");
-        close(fp);
+        fclose(fp);
         return -3;
     }
 	
     tran.size = fread(tran.user_addr, 1, info.st_size, fp);
-    close(fp);
+    fclose(fp);
     if ( tran.size != info.st_size )
     {
         printf("selectmap read file failed.\n");
