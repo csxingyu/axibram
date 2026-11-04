@@ -9,7 +9,7 @@
 - **寄存器读写**：通过 `ioctl` 或 `mmap` 直接读写 FPGA 外设寄存器；
 - **DMA 一致性内存**：申请非缓存（uncached）的连续 DMA 内存并映射到用户态，供 FPGA 侧 DMA 引擎使用；
 - **FPGA 中断通知**：支持实时信号、`select/poll`、`SIGIO` 三种异步/同步通知方式；
-- **SelectMap 在线烧写**：通过 SelectMap 接口在线配置 Xilinx 7 系列 FPGA bitstream。
+- **SelectMap 在线烧写**：通过 SelectMap 接口在线配置 Xilinx 7 系列 FPGA bitstream，支持内核加载与应用层直接加载两种方式。
 
 设备节点形如 `/dev/axibram0`、`/dev/axibram1` ……，最多支持 17 个实例（`axibram0` ~ `axibram16`）。
 
@@ -47,7 +47,7 @@ axibram/
     │   └── utils.c/.h           # 工具函数（StringToDec 等）
     ├── reg.c              # 寄存器读写示例
     ├── irq.c              # 中断通知演示示例
-    ├── selectmap.c        # SelectMap 烧写示例
+    ├── selectmap.c        # SelectMap 应用层烧写示例（mmap 寄存器后直接配置）
     ├── makefile           # 示例独立编译入口
     └── examples.mk        # 示例构建配置（被顶层 Makefile include）
 ```
@@ -119,7 +119,8 @@ int fd = open("/dev/axibram0", O_RDWR | O_EXCL);
 | `AXIBRAM_IO_VERSION` | 读 | `unsigned int` | 读取驱动版本号（当前 `0x01000001`） |
 | `AXIBRAM_IO_READ_REGISTER` | 读 | `struct axibram_register` | 读寄存器（offset 为字节偏移，须 4 对齐） |
 | `AXIBRAM_IO_WRITE_REGISTER` | 写 | `struct axibram_register` | 写寄存器 |
-| `AXIBRAM_IO_SELECT_MAP` | 写 | `struct axibram_data_transaction` | SelectMap 烧写 bitstream |
+| `AXIBRAM_IO_SELECT_MAP` | 写 | `struct axibram_data_transaction` | SelectMap 烧写 bitstream（内核方式） |
+| `AXIBRAM_IO_GET_REG_SIZE` | 读 | `unsigned int` | 读取寄存器空间大小（配合 mmap 寄存器映射） |
 | `AXIBRAM_IO_IRQ` | 写 | `unsigned int` | 安装/卸载中断，0 卸载，非 0 为通知信号号 |
 
 ```c
@@ -143,11 +144,14 @@ struct axibram_data_transaction {
 | `0` | 申请一块 **DMA 一致性内存** | `dma_alloc_coherent` + `dma_mmap_coherent`，非缓存，供 FPGA DMA / SelectMap 数据使用 |
 | `getpagesize()`（一页） | 映射 **FPGA 寄存器** | `remap_pfn_range` + `pgprot_noncached`，直接操作硬件寄存器 |
 
+映射寄存器前，通常先通过 `AXIBRAM_IO_GET_REG_SIZE` 获取寄存器空间大小，再以该大小 `mmap`。
+
 对应封装（[axibram_driver.c](examples/driver/axibram_driver.c)）：
 
 ```c
 void *axibram_driver_malloc(int fd, unsigned int size);  /* DMA 内存，mmap offset=0 */
 void *axibram_driver_mmap(int fd, unsigned int size);    /* 寄存器，mmap offset=页 */
+unsigned int axibram_get_reg_size(int fd);               /* 获取寄存器空间大小 */
 ```
 
 ### 6.4 中断通知
@@ -220,17 +224,30 @@ platform 总线匹配 compatible
 
 ### 7.5 SelectMap 配置
 
+支持两种方式，推荐使用应用层方式：
+
+**方式一：应用层加载（推荐）**
+
 ```
-应用读 bitstream 到 mmap DMA 内存
-  → ioctl(AXIBRAM_IO_SELECT_MAP)
-  → 驱动 user_to_kernel 解析内核地址
-  → SelectMap_Cfg_V7 执行 Xilinx 7 系列配置时序：
+应用 ioctl(GET_REG_SIZE) 获取寄存器空间大小
+  → mmap(offset=页) 映射 FPGA 寄存器到用户区
+  → 读 bitstream 到普通内存
+  → 应用层 SelectMap_Cfg_V7 通过 reg_read/reg_write 直接操作寄存器：
     测试寄存器 → 复位 → 分频 → Program_b 启动 → 等 Init_b 拉低 →
     Rdwr_b 写模式 → 写数据（受 Fifo_full 节流）→ 等 FIFO 空 →
     停止 → 等 Done 拉高 → 检查 Init_b
 ```
 
-每个等待环节均带超时保护，异常时返回错误码而非死循环。
+**方式二：内核加载（ioctl）**
+
+```
+应用读 bitstream 到 mmap DMA 内存
+  → ioctl(AXIBRAM_IO_SELECT_MAP)
+  → 驱动 user_to_kernel 解析内核地址
+  → 内核 SelectMap_Cfg_V7 执行同样的配置时序
+```
+
+两种方式的每个等待环节均带超时保护，异常时返回错误码而非死循环。
 
 ## 8. 示例程序使用
 
@@ -248,19 +265,19 @@ platform 总线匹配 compatible
 # 方式：1 实时信号（默认） 2 select/poll 3 SIGIO 4 DMA 内存申请
 ```
 
-### 8.3 StartV7 —— SelectMap 烧写
+### 8.3 StartV7 —— SelectMap 烧写（应用层加载）
 
-将 bitstream 命名为 `v7_pl_binstream.bin` 放在与程序相同目录，然后：
+将 bitstream 命名为 `k7.bin` 放在与程序相同目录，然后：
 
 ```bash
 ./StartV7.elf
 ```
 
-程序打开 `/dev/axibram2`，通过 SelectMap 将 bitstream 写入 FPGA。
+程序打开 `/dev/axibram1`，先 `ioctl(GET_REG_SIZE)` 获取寄存器空间大小并 `mmap` 映射到用户区，再在应用层直接操作寄存器完成 SelectMap 配置。
 
 ## 9. SelectMap 返回码
 
-`AXIBRAM_IO_SELECT_MAP` 的返回值（`SelectMap_Cfg_V7`）：
+`SelectMap_Cfg_V7`（内核与应用层两个版本返回码一致）：
 
 | 返回值 | 含义 |
 |---|---|

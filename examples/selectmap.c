@@ -57,7 +57,6 @@ int SelectMap_Cfg_V7(unsigned char *membase, unsigned int *pdata, unsigned int l
     unsigned int Done_status= 0 ;
     unsigned int sendcnt = 0 ;
     unsigned int Wait_cnt = 0;
-	unsigned int data = 0;
     WordLen = length >> 2; // 将输入的数据长度由字节统计长度变为 4字节统计长度
 
     printf("membase = %p.\n", membase);
@@ -161,7 +160,7 @@ int SelectMap_Cfg_V7(unsigned char *membase, unsigned int *pdata, unsigned int l
                 return -2;
             }
             usleep(100); // 延时等待稳定
-            printf("****** write %d %d, 0x%x******\r\n", WordLen, sendcnt, data);
+            printf("****** write %d %d, fifo=0x%x******\r\n", WordLen, sendcnt, Init_b_status);
         }
     }
     
@@ -300,8 +299,14 @@ int axibram_selectmap(int filp, const char *fileName)
 
     // 获取硬件寄存器空间大小及寄存器地址
     unsigned int size = axibram_get_reg_size(filp);
+    if ( 0 == size )
+    {
+        printf("get reg size failed.\n");
+        fclose(fp);
+        return -3;
+    }
     void *pPhy = axibram_driver_mmap(filp, size);
-    if ( NULL == pPhy )
+    if ( MAP_FAILED == pPhy )
     {
         printf("selectmap mmap memory failed.\n");
         fclose(fp);
@@ -328,7 +333,7 @@ int axibram_selectmap(int filp, const char *fileName)
         return -4;
     }
 	
-    SelectMap_Cfg_V7((unsigned char*)pPhy, (unsigned int *)tran.user_addr, tran.size);
+    rc = SelectMap_Cfg_V7((unsigned char*)pPhy, (unsigned int *)tran.user_addr, tran.size);
   
     axibram_driver_munmap(pPhy, size);
     free(tran.user_addr);
@@ -357,12 +362,12 @@ int main(int argc, char *const *argv)
     int filp = axibram_driver_open("/dev/axibram1");
     if ( -1 == filp )
     {
-        printf("open driver[/dev/axibram2] failed.\r\n");
+        printf("open driver[/dev/axibram1] failed.\r\n");
         return 0;
     } else
     {
 		unsigned int ver = axibram_driver_version(filp);
-    	printf("open selectmap driver[/dev/axibram2] success. driver version V%x.%x.%x.%x.\r\n",
+    	printf("open selectmap driver[/dev/axibram1] success. driver version V%x.%x.%x.%x.\r\n",
                    (ver >> 24) & 0xFF , (ver >> 16) & 0xFF, (ver >> 8) & 0xFF, ver & 0xFF);
     }
 

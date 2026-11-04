@@ -9,7 +9,7 @@ KERNEL_SYMS = $(KERNEL_PATH)/Module.symvers
 # 驱动程序的源文件列表。将名称导出到Kbuild文件中。
 DRIVER_DIR := axibram
 # 需要编译的文件
-export BUILD_FILES := axi_bram.c  axi_selectmap.c axibram_chrdev.c axibram_irq.c axibram_irq.c
+export BUILD_FILES := axi_bram.c  axi_selectmap.c axibram_chrdev.c axibram_irq.c
 DRIVER_PATHS := $(addprefix $(AXIBRAM_PATH)/,$(BUILD_FILES))
 
 # 编译生成的内核对象文件
