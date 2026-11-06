@@ -191,6 +191,15 @@ int axibram_driver_insert_irq(int filp, __sighandler_t handler, void (*sighandle
     return rc;
 }
 
+// 移除中断
+void axibram_driver_remove_irq(int filp)
+{
+    // 通知驱动安装中断，中断到来时驱动给本进程发实时信号
+    if ( -1 == ioctl(filp, AXIBRAM_IO_IRQ, 0x0) )
+    {
+        printf("ioctl(AXIBRAM_IO_IRQ) error, irq remove failed.\r\n");
+    } 
+}
 
 /*
 标题：selectmap启动

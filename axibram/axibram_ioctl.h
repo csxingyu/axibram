@@ -1,5 +1,5 @@
 /*
- * 湖南迈克森伟电子科技有限公司
+ * 湖南星语科技有限公司
  * Copyright (c) 2024
  * All rights reserved.
  *
@@ -46,7 +46,7 @@ struct axibram_data_transaction
 // 读取驱动版本号
 #define AXIBRAM_IO_VERSION          _IOR(AXIBRAM_IOCTL_MAGIC, 0, unsigned int)
 // 读取寄存器值
-#define AXIBRAM_IO_READ_REGISTER    _IOR(AXIBRAM_IOCTL_MAGIC, 1, struct axibram_register)
+#define AXIBRAM_IO_READ_REGISTER    _IOWR(AXIBRAM_IOCTL_MAGIC, 1, struct axibram_register)
 // 向寄存器写入值
 #define AXIBRAM_IO_WRITE_REGISTER   _IOW(AXIBRAM_IOCTL_MAGIC, 2, struct axibram_register)
 // Select map V7启动

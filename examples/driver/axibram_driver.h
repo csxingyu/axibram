@@ -1,5 +1,5 @@
 /*
- * 湖南迈克森伟电子科技有限公司
+ * 湖南星语科技有限公司
  * Copyright (c) 2024
  * All rights reserved.
  *
@@ -126,6 +126,8 @@ int axibram_driver_writeReg(int filp, unsigned int reg, unsigned int value);
 */
 int axibram_driver_insert_irq(int filp, __sighandler_t handler, void (*sighandler) (int, siginfo_t *, void *));
 
+// 移除中断
+void axibram_driver_remove_irq(int filp);
 /*
 标题：selectmap启动
 参数：
