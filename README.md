@@ -117,7 +117,7 @@ int fd = open("/dev/axibram0", O_RDWR | O_EXCL);
 | 命令 | 方向 | 参数类型 | 说明 |
 |---|---|---|---|
 | `AXIBRAM_IO_VERSION` | 读 | `unsigned int` | 读取驱动版本号（当前 `0x01000001`） |
-| `AXIBRAM_IO_READ_REGISTER` | 读 | `struct axibram_register` | 读寄存器（offset 为字节偏移，须 4 对齐） |
+| `AXIBRAM_IO_READ_REGISTER` | 读/写 | `struct axibram_register` | 读寄存器（先传入 offset，再读回 data；offset 须 4 对齐） |
 | `AXIBRAM_IO_WRITE_REGISTER` | 写 | `struct axibram_register` | 写寄存器 |
 | `AXIBRAM_IO_SELECT_MAP` | 写 | `struct axibram_data_transaction` | SelectMap 烧写 bitstream（内核方式） |
 | `AXIBRAM_IO_GET_REG_SIZE` | 读 | `unsigned int` | 读取寄存器空间大小（配合 mmap 寄存器映射） |
@@ -170,6 +170,14 @@ unsigned int axibram_get_reg_size(int fd);               /* 获取寄存器空�
 | 携带数据 | ✅ `si_code` 带中断号 | ❌ 只有有无 | 弱 |
 | 超时/多 fd 复用 | ❌ | ✅ 天然支持 | ❌ |
 | 处理上下文 | 信号处理器（受限） | 主流程 | 信号处理器 |
+
+安装与移除中断的封装接口（[axibram_driver.c](examples/driver/axibram_driver.c)）：
+
+```c
+int  axibram_driver_insert_irq(int fd, __sighandler_t handler,
+                               void (*sighandler)(int, siginfo_t *, void *)); /* 安装中断 */
+void axibram_driver_remove_irq(int fd);   /* 移除中断（内部 ioctl(AXIBRAM_IO_IRQ, 0)） */
+```
 
 ## 7. 工作流程
 
